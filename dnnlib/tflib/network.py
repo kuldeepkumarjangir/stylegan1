@@ -1,10 +1,5 @@
-﻿# Copyright (c) 2019, NVIDIA CORPORATION. All rights reserved.
-#
-# This work is licensed under the Creative Commons Attribution-NonCommercial
-# 4.0 International License. To view a copy of this license, visit
-# http://creativecommons.org/licenses/by-nc/4.0/ or send a letter to
-# Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.
 
+#nvidia
 """Helper for managing networks."""
 
 import types
@@ -139,7 +134,7 @@ class Network:
             self.name = self._build_func_name
         assert re.match("^[A-Za-z0-9_.\\-]*$", self.name)
         with tf.name_scope(None):
-            self.scope = tf.get_default_graph().unique_name(self.name, mark_as_used=True)
+            self.scope = tf.compat.v1.get_default_graph().unique_name(self.name, mark_as_used=True)
 
         # Finalize build func kwargs.
         build_kwargs = dict(self.static_kwargs)
@@ -147,11 +142,11 @@ class Network:
         build_kwargs["components"] = self.components
 
         # Build template graph.
-        with tfutil.absolute_variable_scope(self.scope, reuse=tf.AUTO_REUSE), tfutil.absolute_name_scope(self.scope):  # ignore surrounding scopes
-            assert tf.get_variable_scope().name == self.scope
-            assert tf.get_default_graph().get_name_scope() == self.scope
+        with tfutil.absolute_variable_scope(self.scope, reuse=tf.compat.v1.AUTO_REUSE), tfutil.absolute_name_scope(self.scope):  # ignore surrounding scopes
+            assert tf.compat.v1.get_variable_scope().name == self.scope
+            assert tf.compat.v1.get_default_graph().get_name_scope() == self.scope
             with tf.control_dependencies(None):  # ignore surrounding control dependencies
-                self.input_templates = [tf.placeholder(tf.float32, name=name) for name in self.input_names]
+                self.input_templates = [tf.compat.v1.placeholder(tf.float32, name=name) for name in self.input_names]
                 out_expr = self._build_func(*self.input_templates, **build_kwargs)
 
         # Collect outputs.
@@ -179,7 +174,7 @@ class Network:
         self.output_names = [t.name.split("/")[-1].split(":")[0] for t in self.output_templates]
 
         # List variables.
-        self.own_vars = OrderedDict((var.name[len(self.scope) + 1:].split(":")[0], var) for var in tf.global_variables(self.scope + "/"))
+        self.own_vars = OrderedDict((var.name[len(self.scope) + 1:].split(":")[0], var) for var in tf.compat.v1.global_variables(self.scope + "/"))
         self.vars = OrderedDict(self.own_vars)
         self.vars.update((comp.name + "/" + name, var) for comp in self.components.values() for name, var in comp.vars.items())
         self.trainables = OrderedDict((name, var) for name, var in self.vars.items() if var.trainable)
@@ -209,15 +204,15 @@ class Network:
         build_kwargs["components"] = self.components
 
         # Build TensorFlow graph to evaluate the network.
-        with tfutil.absolute_variable_scope(self.scope, reuse=True), tf.name_scope(self.name):
-            assert tf.get_variable_scope().name == self.scope
+        with tfutil.absolute_variable_scope(self.scope, reuse=True), tf.compat.v1.name_scope(self.name):
+            assert tf.compat.v1.get_variable_scope().name == self.scope
             valid_inputs = [expr for expr in in_expr if expr is not None]
             final_inputs = []
             for expr, name, shape in zip(in_expr, self.input_names, self.input_shapes):
                 if expr is not None:
                     expr = tf.identity(expr, name=name)
                 else:
-                    expr = tf.zeros([tf.shape(valid_inputs[0])[0]] + shape[1:], name=name)
+                    expr = tf.zeros([tf.shape(input=valid_inputs[0])[0]] + shape[1:], name=name)
                 final_inputs.append(expr)
             out_expr = self._build_func(*final_inputs, **build_kwargs)
 
@@ -400,7 +395,7 @@ class Network:
         if key not in self._run_cache:
             with tfutil.absolute_name_scope(self.scope + "/_Run"), tf.control_dependencies(None):
                 with tf.device("/cpu:0"):
-                    in_expr = [tf.placeholder(tf.float32, name=name) for name in self.input_names]
+                    in_expr = [tf.compat.v1.placeholder(tf.float32, name=name) for name in self.input_names]
                     in_split = list(zip(*[tf.split(x, num_gpus) for x in in_expr]))
 
                 out_split = []
@@ -440,7 +435,7 @@ class Network:
             mb_end = min(mb_begin + minibatch_size, num_items)
             mb_num = mb_end - mb_begin
             mb_in = [src[mb_begin : mb_end] if src is not None else np.zeros([mb_num] + shape[1:]) for src, shape in zip(in_arrays, self.input_shapes)]
-            mb_out = tf.get_default_session().run(out_expr, dict(zip(in_expr, mb_in)))
+            mb_out = tf.compat.v1.get_default_session().run(out_expr, dict(zip(in_expr, mb_in)))
 
             for dst, src in zip(out_arrays, mb_out):
                 dst[mb_begin: mb_end] = src
@@ -456,7 +451,7 @@ class Network:
     def list_ops(self) -> List[TfExpression]:
         include_prefix = self.scope + "/"
         exclude_prefix = include_prefix + "_"
-        ops = tf.get_default_graph().get_operations()
+        ops = tf.compat.v1.get_default_graph().get_operations()
         ops = [op for op in ops if op.name.startswith(include_prefix)]
         ops = [op for op in ops if not op.name.startswith(exclude_prefix)]
         return ops
@@ -546,7 +541,7 @@ class Network:
                 else:
                     name = title + "_toplevel/" + local_name
 
-                tf.summary.histogram(name, var)
+                tf.compat.v1.summary.histogram(name, var)
 
 #----------------------------------------------------------------------------
 # Backwards-compatible emulation of legacy output transformation in Network.run().
@@ -582,7 +577,7 @@ def _legacy_output_transform_func(*expr, out_mul=1.0, out_add=0.0, out_shrink=1,
 
     if out_shrink > 1:
         ksize = [1, 1, out_shrink, out_shrink]
-        expr = [tf.nn.avg_pool(x, ksize=ksize, strides=ksize, padding="VALID", data_format="NCHW") for x in expr]
+        expr = [tf.nn.avg_pool2d(input=x, ksize=ksize, strides=ksize, padding="VALID", data_format="NCHW") for x in expr]
 
     if out_dtype is not None:
         if tf.as_dtype(out_dtype).is_integer:

@@ -49,9 +49,9 @@ class Optimizer:
 
         # Init fields.
         self.name = name
-        self.learning_rate = tf.convert_to_tensor(learning_rate)
+        self.learning_rate = tf.convert_to_tensor(value=learning_rate)
         self.id = self.name.replace("/", ".")
-        self.scope = tf.get_default_graph().unique_name(self.id)
+        self.scope = tf.compat.v1.get_default_graph().unique_name(self.id)
         self.optimizer_class = util.get_obj_by_name(tf_optimizer)
         self.optimizer_kwargs = dict(kwargs)
         self.use_loss_scaling = use_loss_scaling
@@ -87,7 +87,7 @@ class Optimizer:
         assert all(var.device == dev for var in trainable_vars)
 
         # Register device and compute gradients.
-        with tf.name_scope(self.id + "_grad"), tf.device(dev):
+        with tf.compat.v1.name_scope(self.id + "_grad"), tf.device(dev):
             if dev not in self._dev_opt:
                 opt_name = self.scope.replace("/", "_") + "_opt%d" % len(self._dev_opt)
                 assert callable(self.optimizer_class)
@@ -95,7 +95,7 @@ class Optimizer:
                 self._dev_grads[dev] = []
 
             loss = self.apply_loss_scaling(tf.cast(loss, tf.float32))
-            grads = self._dev_opt[dev].compute_gradients(loss, trainable_vars, gate_gradients=tf.train.Optimizer.GATE_NONE)  # disable gating to reduce memory usage
+            grads = self._dev_opt[dev].compute_gradients(loss, trainable_vars, gate_gradients=tf.compat.v1.train.Optimizer.GATE_NONE)  # disable gating to reduce memory usage
             grads = [(g, v) if g is not None else (tf.zeros_like(v), v) for g, v in grads]  # replace disconnected gradients with zeros
             self._dev_grads[dev].append(grads)
 
@@ -114,7 +114,7 @@ class Optimizer:
             dev_grads = OrderedDict()  # device => [(grad, var), ...]
 
             for dev_idx, dev in enumerate(devices):
-                with tf.name_scope("ProcessGrads%d" % dev_idx), tf.device(dev):
+                with tf.compat.v1.name_scope("ProcessGrads%d" % dev_idx), tf.device(dev):
                     sums = []
 
                     for gv in zip(*self._dev_grads[dev]):
@@ -127,7 +127,7 @@ class Optimizer:
 
             # Sum gradients across devices.
             if len(devices) > 1:
-                with tf.name_scope("SumAcrossGPUs"), tf.device(None):
+                with tf.compat.v1.name_scope("SumAcrossGPUs"), tf.device(None):
                     for var_idx, grad_shape in enumerate(self._grad_shapes):
                         g = [dev_grads[dev][var_idx][0] for dev in devices]
 
@@ -139,36 +139,36 @@ class Optimizer:
 
             # Apply updates separately on each device.
             for dev_idx, (dev, grads) in enumerate(dev_grads.items()):
-                with tf.name_scope("ApplyGrads%d" % dev_idx), tf.device(dev):
+                with tf.compat.v1.name_scope("ApplyGrads%d" % dev_idx), tf.device(dev):
                     # Scale gradients as needed.
                     if self.use_loss_scaling or total_grads > 1:
-                        with tf.name_scope("Scale"):
+                        with tf.compat.v1.name_scope("Scale"):
                             coef = tf.constant(np.float32(1.0 / total_grads), name="coef")
                             coef = self.undo_loss_scaling(coef)
                             grads = [(g * coef, v) for g, v in grads]
 
                     # Check for overflows.
-                    with tf.name_scope("CheckOverflow"):
-                        grad_ok = tf.reduce_all(tf.stack([tf.reduce_all(tf.is_finite(g)) for g, v in grads]))
+                    with tf.compat.v1.name_scope("CheckOverflow"):
+                        grad_ok = tf.reduce_all(input_tensor=tf.stack([tf.reduce_all(input_tensor=tf.math.is_finite(g)) for g, v in grads]))
 
                     # Update weights and adjust loss scaling.
-                    with tf.name_scope("UpdateWeights"):
+                    with tf.compat.v1.name_scope("UpdateWeights"):
                         # pylint: disable=cell-var-from-loop
                         opt = self._dev_opt[dev]
                         ls_var = self.get_loss_scaling_var(dev)
 
                         if not self.use_loss_scaling:
-                            ops.append(tf.cond(grad_ok, lambda: opt.apply_gradients(grads), tf.no_op))
+                            ops.append(tf.cond(pred=grad_ok, true_fn=lambda: opt.apply_gradients(grads), false_fn=tf.no_op))
                         else:
-                            ops.append(tf.cond(grad_ok,
-                                               lambda: tf.group(tf.assign_add(ls_var, self.loss_scaling_inc), opt.apply_gradients(grads)),
-                                               lambda: tf.group(tf.assign_sub(ls_var, self.loss_scaling_dec))))
+                            ops.append(tf.cond(pred=grad_ok,
+                                               true_fn=lambda: tf.group(tf.compat.v1.assign_add(ls_var, self.loss_scaling_inc), opt.apply_gradients(grads)),
+                                               false_fn=lambda: tf.group(tf.compat.v1.assign_sub(ls_var, self.loss_scaling_dec))))
 
                     # Report statistics on the last device.
                     if dev == devices[-1]:
-                        with tf.name_scope("Statistics"):
+                        with tf.compat.v1.name_scope("Statistics"):
                             ops.append(autosummary.autosummary(self.id + "/learning_rate", self.learning_rate))
-                            ops.append(autosummary.autosummary(self.id + "/overflow_frequency", tf.where(grad_ok, 0, 1)))
+                            ops.append(autosummary.autosummary(self.id + "/overflow_frequency", tf.compat.v1.where(grad_ok, 0, 1)))
 
                             if self.use_loss_scaling:
                                 ops.append(autosummary.autosummary(self.id + "/loss_scaling_log2", ls_var))

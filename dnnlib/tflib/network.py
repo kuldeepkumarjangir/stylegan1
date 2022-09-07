@@ -1,4 +1,5 @@
-#Nvidia
+
+#nvidia
 """Helper for managing networks."""
 
 import types
@@ -132,7 +133,7 @@ class Network:
         if self.name is None:
             self.name = self._build_func_name
         assert re.match("^[A-Za-z0-9_.\\-]*$", self.name)
-        with tf.compat.v1.name_scope(None):
+        with tf.compat.v1.variable_scope(None):
             self.scope = tf.compat.v1.get_default_graph().unique_name(self.name, mark_as_used=True)
 
         # Finalize build func kwargs.
@@ -532,7 +533,7 @@ class Network:
         if title is None:
             title = self.name
 
-        with tf.compat.v1.name_scope(None), tf.device(None), tf.control_dependencies(None):
+        with tf.compat.v1.variable_scope(None), tf.device(None), tf.control_dependencies(None):
             for local_name, var in self.trainables.items():
                 if "/" in local_name:
                     p = local_name.split("/")

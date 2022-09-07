@@ -121,12 +121,12 @@ def finalize_autosummaries() -> None:
     with tf.device(None), tf.control_dependencies(None):
         for name, vars_list in _vars.items():
             name_id = name.replace("/", "_")
-            with tfutil.absolute_name_scope("Autosummary/" + name_id):
+            with tfutil.absolute_variable_scope("Autosummary/" + name_id):
                 moments = tf.add_n(vars_list)
                 moments /= moments[0]
                 with tf.control_dependencies([moments]):  # read before resetting
                     reset_ops = [tf.compat.v1.assign(var, tf.zeros(3, dtype=_dtype)) for var in vars_list]
-                    with tf.name_scope(None), tf.control_dependencies(reset_ops):  # reset before reporting
+                    with tf.compat.v1.variable_scope(None), tf.control_dependencies(reset_ops):  # reset before reporting
                         mean = moments[1]
                         std = tf.sqrt(moments[2] - tf.square(moments[1]))
                         tf.compat.v1.summary.scalar(name, mean)

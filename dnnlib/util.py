@@ -18,6 +18,9 @@ import requests
 import html
 import hashlib
 import glob
+import tempfile
+import urllib
+import urllib.request
 import uuid
 
 from distutils.util import strtobool
